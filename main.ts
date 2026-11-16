@@ -1,32 +1,58 @@
-// A working threejs-fps-01 entry (Node 22, standard library only): the game is this directory's
-// game/ folder, plain static files the browser loads as ES modules with three.js from an import
-// map, and the program hands it in. It copies game/ and screenshots/ from beside this file to
-// /output and writes /output/dossier.json, the summary the judge reads, with the vendored make.fun
-// library. A starting point, not a winner: a grey room, one rifle and four targets that drop when
-// shot. Build your game, put your PNG or JPEG screenshots in screenshots/ (the first by name is
-// the cover) and run it.
+// Entry program for the threejs-fps-02 bounty (Node 22, standard library only).
 //
-// Serve it locally with `node serve.ts`, then open http://localhost:8080.
-// Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
+// This is the hand-in step: it gathers the playable game in game/, the cover
+// and action shots in screenshots/, and the dossier.json the judge reads,
+// and writes them all under one output directory. The grader runs it with
+// /output as the target; locally, point MAKEFUN_OUTPUT_DIR at a scratch
+// folder instead:
+//
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
+//   node serve.ts   # play the game at http://localhost:8080
 
-import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-threejs.ts';
 
-const here = fileURLToPath(new URL('.', import.meta.url));
-const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+// Directory holding this file; every source path below is resolved from it.
+const repoRoot = fileURLToPath(new URL('./', import.meta.url));
+const targetDir = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
-mkdirSync(out, { recursive: true });
-cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
-mkdirSync(join(out, 'screenshots'), { recursive: true });
-if (existsSync(join(here, 'screenshots'))) cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+// The scorer's caps from reference/gate.json. Only text_max_bytes shapes the
+// dossier bytes; the rest mirror what the scorer refuses: at most 4
+// screenshots, none over 256 KiB; game/ at most 993 entries or 48 MiB in
+// total, sharing /output's own 1000-entry cap with screenshots/ and the
+// dossier file itself.
+const dossierLimits = {
+  text_max_bytes: 163840,
+  screenshots: { max: 4, max_bytes: 262144 },
+  game_max_files: 993,
+  game_max_bytes: 50331648,
+};
 
-// The scorer's own caps (reference/gate.json): only text_max_bytes shapes the bytes; the others refuse an entry the
-// scorer would refuse (more than 4 screenshots or one over 256 KiB; more than 993 files in game/ or 48 MiB of game
-// files, in all: game/ counts beside /output's own 1000-entry cap, its screenshots/ and dossier.json).
-writeFileSync(
-  join(out, 'dossier.json'),
-  buildDossier(out, { text_max_bytes: 163840, screenshots: { max: 4, max_bytes: 262144 }, game_max_files: 993, game_max_bytes: 50331648 }),
-);
+function makeDir(dir: string): void {
+  fs.mkdirSync(dir, { recursive: true });
+}
+
+function copyTree(source: string, destination: string): void {
+  fs.cpSync(source, destination, { recursive: true });
+}
+
+// Copy a folder beside main.ts into the output dir, but only when it exists.
+function copyFolderWhenPresent(folderName: string): void {
+  const source = path.join(repoRoot, folderName);
+  if (!fs.existsSync(source)) return;
+  copyTree(source, path.join(targetDir, folderName));
+}
+
+function assembleBundle(): void {
+  makeDir(targetDir);
+  copyTree(path.join(repoRoot, 'game'), path.join(targetDir, 'game'));
+  makeDir(path.join(targetDir, 'screenshots'));
+  copyFolderWhenPresent('screenshots');
+
+  const dossier = buildDossier(targetDir, dossierLimits);
+  fs.writeFileSync(path.join(targetDir, 'dossier.json'), dossier);
+}
+
+assembleBundle();
